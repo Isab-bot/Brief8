@@ -2,184 +2,122 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import datetime
+import io
 
 
-st.title('Car Prices Clean')
-# Chargement des données
+# Titre de l'application
+st.title('Ventes de voitures aux Etats Unis')
+
+# Définition de la fonction pour charger les données avec le décorateur st.cache_data
 @st.cache_data
 def load_data():
+    # Charger les données du fichier CSV
     data = pd.read_csv("/home/isalog/Brief8/car_prices_clean.csv")
-    #data['make'] = data['make'].astype('category')
+    # Conversion de la colonne 'saledate' en type datetime
+    data['saledate'] = pd.to_datetime(data['saledate'],utc = True)
     return data
+# Fonction pour convertir les dates au format naif et utile pour exporter le fichier excel
+def convert_to_naive_datetime(df):
+    for col in df.select_dtypes(include=['datetime64[ns, UTC]']).columns:
+        df[col] = df[col].dt.tz_localize(None)
+    return df
 
-#st.write(car_prices.dtypes)
-data_load_state = st.text('Chargement des données...')
-car_prices = load_data()
-data_load_state.text('Chargement des données... terminé!')
+# Chargement des données
+df = load_data()
 
-# Affichez le tableau complet
-st.subheader('Données brutes')
-st.dataframe(car_prices)
+df.rename(index=str,columns={"year":"ANNEE",
+                              "make":"MARQUE",
+                              "model":"MODELE",
+                              "trim":"FINITION",
+                              "body":"TYPE",
+                              "transmission":"TRANSMISSION",
+                              "state":"ETAT",
+                              "condition":"EVALUATION_ETAT",
+                              "odometer":"COMPTEUR",
+                              "color":"COULEUR",
+                              "interior":"COULEUR_INT",
+                              "seller":"VENDEUR",
+                              "mmr": "VALEUR_MARCHE",
+                              "sellingprice":"PRIX_VENTE",
+                              "saledate":"DATE_VENTE"
 
-#Selection de la colonne pour le tri
-option = st.selectbox(
-    "Sur quelle colonne voulez_vous effectuer le tri?",
-    ("year", "make", "model","trim", "body", "transmission","state","condition","color", "interior", "seller","mmr","sellingprice","saledate" ),
-)
-# bouton radio pour selectionner l'ordre de tri
-sort_order = st.radio( "Selectionnez l'ordre de tri:",
-                      ("Ascendant","Descendant"))
+}, inplace=True)
 
-st.write(f"Vous avez selectionné: {option} en ordre {sort_order.lower()}" )
-
-# Tri des données
+# Premier filtre : Tri des données
+st.sidebar.subheader("Trier les lignes")
+sort_column = st.sidebar.selectbox("Trier sur cette colonne", df.columns)
+sort_order = st.sidebar.radio("Ordre de tri", ["Ascendant", "Descendant"])
 ascending = sort_order == "Ascendant"
-sorted_data = car_prices.sort_values(by=option, ascending=ascending)
 
-# Affichage des données triées
-st.subheader(f'Données triées par {option} en ordre {sort_order.lower()}')
-st.dataframe(sorted_data)
+# Appliquer le tri
+sorted_car_prices = df.sort_values(by=sort_column, ascending=ascending)
+
+# Deuxième filtre : Filtrer les données
+st.sidebar.subheader("Filtrer les lignes")
+filter_column = st.sidebar.selectbox("Ajouter un filtre", 
+                                    options=[col for col in df.columns if col != sort_column])
+
+# Appliquer le deuxième filtre en fonction du type de données
+if pd.api.types.is_numeric_dtype(sorted_car_prices[filter_column]):
+    min_val, max_val = float(sorted_car_prices[filter_column].min()), float(sorted_car_prices[filter_column].max())
+    filter_range = st.sidebar.slider(f"Filtrer par {filter_column}", min_val, max_val, (min_val, max_val))
+    filtered_car_prices = sorted_car_prices[sorted_car_prices[filter_column].between(*filter_range)]
+elif pd.api.types.is_datetime64_any_dtype(sorted_car_prices[filter_column]):
+    min_date, max_date = sorted_car_prices[filter_column].min().date(), sorted_car_prices[filter_column].max().date()
+    start_date, end_date = st.sidebar.date_input(f"Filtrer par {filter_column}", (min_date, max_date))
+    filtered_car_prices = sorted_car_prices[(sorted_car_prices[filter_column].dt.date >= start_date) & 
+                                             (sorted_car_prices[filter_column].dt.date <= end_date)]
+else:
+    unique_values = sorted_car_prices[filter_column].unique()
+    selected_values = st.sidebar.multiselect(f"Filtrer par {filter_column}", options=unique_values)
+    if selected_values:
+        filtered_car_prices = sorted_car_prices[sorted_car_prices[filter_column].isin(selected_values)]
+    else:
+        filtered_car_prices = sorted_car_prices
 
 # Filtrage par marque
-st.subheader('Filtrer par marque')
-all_makes = car_prices['make'].unique()
-selected_makes = st.multiselect("Choisissez une ou plusieurs marques", options=all_makes)
-
+selected_makes = st.sidebar.multiselect("Choisissez une marque", options=df["MARQUE"].unique())
 if selected_makes:
-    filtered_data = car_prices[car_prices['make'].isin(selected_makes)]
-    st.subheader('Données filtrées par marque')
-    st.dataframe(filtered_data)
-else:
-    st.write("Aucune marque sélectionnée. Veuillez choisir au moins une marque pour filtrer les données.")
+    filtered_car_prices = filtered_car_prices[filtered_car_prices["MARQUE"].isin(selected_makes)]
 
-#Creation de filtres pour les données numériques
-# Filtrage pour les données numériques ('year')
-st.subheader('Filtrer par année')
+# Filtrage par date de vente
+date_range = st.sidebar.date_input("Dates de vente", 
+                                    [df['DATE_VENTE'].min().date(), df['DATE_VENTE'].max().date()],
+                                    min_value=df['DATE_VENTE'].min().date(),
+                                    max_value=df['DATE_VENTE'].max().date(),
+                                    key="date_filter")
 
-# Obtenir les valeurs min et max de la colonne 'year'
-min_year = int(car_prices['year'].min())
-max_year = int(car_prices['year'].max())
+if len(date_range) == 2:
+    start_date, end_date = date_range
+    filtered_car_prices = filtered_car_prices[(filtered_car_prices['DATE_VENTE'].dt.date >= start_date) & 
+                                               (filtered_car_prices['DATE_VENTE'].dt.date <= end_date)]
 
-# Créer un slider pour sélectionner la plage d'années'
-year_range = st.slider(
-    "Sélectionnez la plage d' années",
-    min_value=min_year,
-    max_value=max_year,
-    value=(min_year, max_year)  # valeur par défaut
+# Filtrage par prix de vente
+price_range = st.sidebar.slider("Prix de vente", 
+                                int(df['PRIX_VENTE'].min()), int(df['PRIX_VENTE'].max()), 
+                                (int(df['PRIX_VENTE'].min()), int(df['PRIX_VENTE'].max())))
+filtered_car_prices = filtered_car_prices[filtered_car_prices['PRIX_VENTE'].between(*price_range)]
+
+# Affichage du tableau filtré avec streamlit.dataframe()
+st.subheader('Données filtrées')
+st.dataframe(filtered_car_prices)
+
+# Conversion des dates en format naive
+filtered_car_prices = convert_to_naive_datetime(filtered_car_prices)
+
+#création d'un buffer en mémoire
+buffer = io.BytesIO()
+#Ecriture du DataFrame dans le buffer au format Excel
+with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+    filtered_car_prices.to_excel(writer, sheet_name='Sheet1', index=False)
+
+#Création du bouton de téléchargement
+st.download_button(
+    label="Télécharger le fichier Excel",
+    data=buffer.getvalue(),
+    file_name="donnees_filtrees.xlsx",
+    mime="application/vnd.ms-excel"
 )
-# Filtrer les données en utilisant pandas.Series.between()
-filtered_by_year = car_prices[car_prices['year'].between(year_range[0], year_range[1])]
-
-# Afficher les résultats
-st.subheader('Voitures filtrées par année')
-st.dataframe(filtered_by_year)
-
-# Afficher le nombre de voitures dans la plage des années sélectionnées
-st.write(f"Nombre de voitures dans la plage d'années : {len(filtered_by_year)}")
-
-# Filtrage pour les données numériques ('odometer')
-st.subheader('Filtrer par kilometrage')
-
-# Obtenir les valeurs min et max de la colonne 'odometer'
-min_odometer = int(car_prices['odometer'].min())
-max_odometer = int(car_prices['odometer'].max())
-
-# Créer un slider pour sélectionner la plage de kilomètres'
-odometer_range = st.slider(
-    "Sélectionnez la durée en années",
-    min_value=min_odometer,
-    max_value=max_odometer,
-    value=(min_year, max_year)  # valeur par défaut
-)
-# Filtrer les données en utilisant pandas.Series.between()
-filtered_by_odometer = car_prices[car_prices['odometer'].between(odometer_range[0], odometer_range[1])]
-
-# Afficher les résultats
-st.subheader('Voitures filtrées par km')
-st.dataframe(filtered_by_odometer)
-
-# Afficher le nombre de voitures dans la plage des km sélectionnés
-st.write(f"Nombre de voitures dans la plage de km : {len(filtered_by_odometer)}")
-
-# Filtrage pour les données numériques ('mmr')
-st.subheader('Filtrer par le prix marché')
-
-# Obtenir les valeurs min et max de la colonne 'odometer'
-min_mmr = int(car_prices['mmr'].min())
-max_mmr = int(car_prices['mmr'].max())
-
-# Créer un slider pour sélectionner la plage de kilomètres'
-mmr_range = st.slider(
-    "Sélectionnez la durée en années",
-    min_value=min_mmr,
-    max_value=max_mmr,
-    value=(min_mmr, max_mmr)  # valeur par défaut
-)
-# Filtrer les données en utilisant pandas.Series.between()
-filtered_by_mmr = car_prices[car_prices['mmr'].between(mmr_range[0], mmr_range[1])]
-
-# Afficher les résultats
-st.subheader('Voitures filtrées par prix du marché')
-st.dataframe(filtered_by_mmr)
-
-# Afficher le nombre de voitures dans la plage des prix du marché sélectionés 
-st.write(f"Nombre de voitures dans la plage des prix du marché : {len(filtered_by_mmr)}")
-
-# Filtrage pour les données numériques ('sellingprice')
-st.subheader('Filtrer par prix de vente')
-
-# Obtenir les valeurs min et max de la colonne 'sellingprice'
-min_price = int(car_prices['sellingprice'].min())
-max_price = int(car_prices['sellingprice'].max())
-
-# Créer un slider pour sélectionner la plage de prix
-price_range = st.slider(
-    "Sélectionnez la plage de prix",
-    min_value=min_price,
-    max_value=max_price,
-    value=(min_price, max_price)  # valeur par défaut
-)
-# Filtrer les données en utilisant pandas.Series.between()
-filtered_by_price = car_prices[car_prices['sellingprice'].between(price_range[0], price_range[1])]
-
-# Afficher les résultats
-st.subheader('Voitures filtrées par prix de vente')
-st.dataframe(filtered_by_price)
-
-# Afficher le nombre de voitures dans la plage de prix sélectionnée
-st.write(f"Nombre de voitures dans la plage de prix sélectionnée : {len(filtered_by_price)}")
-
-# Filtrage pour les données numériques ('saledate')
-# Mise au format datetime de la colonne 'saledate' 
-car_prices['saledate'] = pd.to_datetime(car_prices['saledate'])
-
-st.subheader('Filtrer par date de vente')
-
-#Créer un slider pour selectioner la plage de date
-start_date, end_date = st.slider("Sélectionnez la plage de dates", 
-                                 min_value=car_prices['saledate'].min().date(),
-                                 max_value=car_prices['saledate'].max().date(),
-                                 value=(car_prices['saledate'].min().date(), car_prices['saledate'].max().date()))
-start_date = pd.Timestamp(start_date).tz_localize('UTC')
-end_date = pd.Timestamp(end_date).tz_localize('UTC')
-
-filtered_by_date = car_prices[(car_prices['saledate'] >= start_date) & (car_prices['saledate'] <= end_date)]
-
-
-# Afficher les résultats
-st.subheader('Voitures filtrées par date de vente')
-st.dataframe(filtered_by_date)
-
-# Afficher le nombre de voitures dans la plage de prix sélectionnée
-st.write(f"Nombre de voitures dans la plage de date sélectionnée : {len(filtered_by_date)}")
-
-
-
-
-
-
-
-
 
 
 
