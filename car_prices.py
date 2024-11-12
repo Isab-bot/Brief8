@@ -16,6 +16,7 @@ def load_data():
     # Conversion de la colonne 'saledate' en type datetime
     data['saledate'] = pd.to_datetime(data['saledate'],utc = True)
     return data
+
 # Fonction pour convertir les dates au format naif et utile pour exporter le fichier excel
 def convert_to_naive_datetime(df):
     for col in df.select_dtypes(include=['datetime64[ns, UTC]']).columns:
@@ -51,13 +52,29 @@ ascending = sort_order == "Ascendant"
 
 # Appliquer le tri
 sorted_car_prices = df.sort_values(by=sort_column, ascending=ascending)
-
-# Deuxième filtre : Filtrer les données
+name_columns = ["ANNEE","MARQUE","MODELE", "FINITION","TYPE","TRANSMISSION","ETAT","EVALUATION_ETAT","COMPTEUR","COULEUR","COULEUR_INT","VENDEUR","VALEUR_MARCHE","PRIX_VENTE","DATE_VENTE"]
+# Deuxième filtre : Filtrer les données selon le choix du premier filtre
 st.sidebar.subheader("Filtrer les lignes")
-filter_column = st.sidebar.selectbox("Ajouter un filtre", 
-                                    options=[col for col in df.columns if col != sort_column])
+
+
+ #Création de la liste des colonnes disponibles pour le filtrage
+available_columns = [col for col in df.columns if col != sort_column]
+
+# Vérification si des colonnes sont disponibles pour le filtrage
+if available_columns:
+    filter_column = st.sidebar.selectbox("Ajouter un filtre", options=available_columns)
+    #st.write("Colonne de filtre sélectionnée:", filter_column)
+else:
+    #st.warning("Aucune colonne disponible pour le filtrage.")
+    filter_column = None
+
+
+#vérification de sort_column
+#st.write("sort_column:", sort_column)
 
 # Appliquer le deuxième filtre en fonction du type de données
+#verification de la valeur de 'filter_column'
+#st.write("filter_column:", filter_column)
 if pd.api.types.is_numeric_dtype(sorted_car_prices[filter_column]):
     min_val, max_val = float(sorted_car_prices[filter_column].min()), float(sorted_car_prices[filter_column].max())
     filter_range = st.sidebar.slider(f"Filtrer par {filter_column}", min_val, max_val, (min_val, max_val))
@@ -98,26 +115,56 @@ price_range = st.sidebar.slider("Prix de vente",
                                 (int(df['PRIX_VENTE'].min()), int(df['PRIX_VENTE'].max())))
 filtered_car_prices = filtered_car_prices[filtered_car_prices['PRIX_VENTE'].between(*price_range)]
 
+#Group BY
+st.subheader("Analyse GroupBy")
+
+# Sélection de la colonne pour le groupby
+groupby_column = st.selectbox("Choisissez la colonne pour le groupby", df.columns)
+
+
+# Sélection des colonnes pour l'agrégation
+columns_for_agg = ["COMPTEUR", "VALEUR_MARCHE", "PRIX_VENTE"]
+selected_columns = st.multiselect("Sélectionnez les colonnes pour l'agrégation", columns_for_agg)
+if selected_columns:
+# Sélection de la fonction d'agrégation
+    agg_function = st.selectbox("Choisissez la fonction d'agrégation", ["Somme","Moyenne", "Maximum", "Minimum"])
+    
+# Effectuer le groupby
+    if agg_function == "Somme":
+        grouped_data = filtered_car_prices.groupby(groupby_column)[selected_columns].sum()
+    elif agg_function == "Moyenne":
+        grouped_data = filtered_car_prices.groupby(groupby_column)[selected_columns].mean()
+    elif agg_function == "Maximum":
+        grouped_data = filtered_car_prices.groupby(groupby_column)[selected_columns].max()
+    else:
+         grouped_data = filtered_car_prices.groupby(groupby_column)[selected_columns].min()
+    
+# Afficher les résultats
+    st.write(f"{agg_function} par {groupby_column}:")
+    st.dataframe(grouped_data)
+
+
+
 # Affichage du tableau filtré avec streamlit.dataframe()
 st.subheader('Données filtrées')
 st.dataframe(filtered_car_prices)
 
-# Conversion des dates en format naive
+# Conversion des dates en format naive pour pouvoir télécharger le fichier sous Excel
 filtered_car_prices = convert_to_naive_datetime(filtered_car_prices)
 
-#création d'un buffer en mémoire
+#création d'un buffer en mémoire pour télécharger
 buffer = io.BytesIO()
 #Ecriture du DataFrame dans le buffer au format Excel
 with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
     filtered_car_prices.to_excel(writer, sheet_name='Sheet1', index=False)
 
 #Création du bouton de téléchargement
-st.download_button(
-    label="Télécharger le fichier Excel",
-    data=buffer.getvalue(),
-    file_name="donnees_filtrees.xlsx",
-    mime="application/vnd.ms-excel"
-)
+#st.download_button(
+#    label="Télécharger le fichier Excel",
+ #   data=buffer.getvalue(),
+ #   file_name="donnees_filtrees.xlsx",
+# mime="application/vnd.ms-excel"
+
 
 
 
