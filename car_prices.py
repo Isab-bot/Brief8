@@ -56,7 +56,6 @@ name_columns = ["ANNEE","MARQUE","MODELE", "FINITION","TYPE","TRANSMISSION","ETA
 # Deuxième filtre : Filtrer les données selon le choix du premier filtre
 st.sidebar.subheader("Filtrer les lignes")
 
-
  #Création de la liste des colonnes disponibles pour le filtrage
 available_columns = [col for col in df.columns if col != sort_column]
 
@@ -92,10 +91,6 @@ else:
     else:
         filtered_car_prices = sorted_car_prices
 
-# Filtrage par marque
-selected_makes = st.sidebar.multiselect("Choisissez une marque", options=df["MARQUE"].unique())
-if selected_makes:
-    filtered_car_prices = filtered_car_prices[filtered_car_prices["MARQUE"].isin(selected_makes)]
 
 # Filtrage par date de vente
 date_range = st.sidebar.date_input("Dates de vente", 
@@ -153,10 +148,10 @@ st.dataframe(filtered_car_prices)
 filtered_car_prices = convert_to_naive_datetime(filtered_car_prices)
 
 #création d'un buffer en mémoire pour télécharger
-buffer = io.BytesIO()
+#buffer = io.BytesIO()
 #Ecriture du DataFrame dans le buffer au format Excel
-with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-    filtered_car_prices.to_excel(writer, sheet_name='Sheet1', index=False)
+#with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+#    filtered_car_prices.to_excel(writer, sheet_name='Sheet1', index=False)
 
 #Création du bouton de téléchargement
 #st.download_button(
